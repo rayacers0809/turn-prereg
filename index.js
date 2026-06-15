@@ -162,6 +162,7 @@ app.get('/prereg/callback', async (req, res) => {
       status: 'registered',
       username: user.username,
       avatar: user.avatar || '',
+      id: user.id,
       code: reg.code,
       number: reg.number,
       claimed: reg.claimed ? '1' : '0',
