@@ -29,7 +29,7 @@ const BTN_ID  = 'prereg_register';
 
 const DISCORD_CLIENT_ID     = process.env.CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.CLIENT_SECRET;
-const REDIRECT_URI          = 'https://turn-prereg-production.up.railway.app/prereg/callback';
+const REDIRECT_URI          = 'https://turn2026.com/prereg/callback';
 
 // ── Firestore 로직 ──────────────────────────────────────
 async function nextCode() {
@@ -118,7 +118,7 @@ app.get('/prereg/login', (req, res) => {
 // OAuth 콜백
 app.get('/prereg/callback', async (req, res) => {
   const { code } = req.query;
-  if (!code) return res.redirect('https://turn2026.com/prereg.html?error=no_code');
+  if (!code) return res.redirect('https://turn-prereg-site.pages.dev/prereg.html?error=no_code');
 
   try {
     // 토큰 교환
@@ -134,14 +134,14 @@ app.get('/prereg/callback', async (req, res) => {
       }),
     });
     const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) return res.redirect('https://turn2026.com/prereg.html?error=token_fail');
+    if (!tokenData.access_token) return res.redirect('https://turn-prereg-site.pages.dev/prereg.html?error=token_fail');
 
     // 유저 정보 가져오기
     const userRes = await fetch('https://discord.com/api/users/@me', {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
     const user = await userRes.json();
-    if (!user.id) return res.redirect('https://turn2026.com/prereg.html?error=user_fail');
+    if (!user.id) return res.redirect('https://turn-prereg-site.pages.dev/prereg.html?error=user_fail');
 
     // Firestore에서 사전예약 조회
     const reg = await lookup(user.id);
@@ -154,7 +154,7 @@ app.get('/prereg/callback', async (req, res) => {
         avatar: user.avatar || '',
         id: user.id,
       });
-      return res.redirect(`https://turn2026.com/prereg.html?${params}`);
+      return res.redirect(`https://turn-prereg-site.pages.dev/prereg.html?${params}`);
     }
 
     // 신청 완료
@@ -166,11 +166,11 @@ app.get('/prereg/callback', async (req, res) => {
       number: reg.number,
       claimed: reg.claimed ? '1' : '0',
     });
-    return res.redirect(`https://turn2026.com/prereg.html?${params}`);
+    return res.redirect(`https://turn-prereg-site.pages.dev/prereg.html?${params}`);
 
   } catch (e) {
     console.error('OAuth 오류:', e);
-    return res.redirect('https://turn2026.com/prereg.html?error=server_error');
+    return res.redirect('https://turn-prereg-site.pages.dev/prereg.html?error=server_error');
   }
 });
 
