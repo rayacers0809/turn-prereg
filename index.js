@@ -1,5 +1,5 @@
 /**
- *  Turn City 사전예약 봇 (Railway 배포용)
+ * Turn City 사전예약 봇 + Express OAuth 서버
  */
 
 require('dotenv').config();
@@ -9,15 +9,16 @@ const {
   ButtonStyle, PermissionFlagsBits,
 } = require('discord.js');
 const admin = require('firebase-admin');
+const express = require('express');
+const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 
-// ── Firebase 초기화 (Railway 환경변수 or 로컬 파일) ────
+// ── Firebase ────────────────────────────────────────────
 let serviceAccount;
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 } else {
   serviceAccount = require(process.env.FIREBASE_KEY || './firebase-key.json');
 }
-
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 db.settings({ preferRest: true, ignoreUndefinedProperties: true });
@@ -25,6 +26,10 @@ db.settings({ preferRest: true, ignoreUndefinedProperties: true });
 const COL_REG = 'prereg';
 const META    = 'prereg_meta';
 const BTN_ID  = 'prereg_register';
+
+const DISCORD_CLIENT_ID     = process.env.CLIENT_ID;
+const DISCORD_CLIENT_SECRET = process.env.CLIENT_SECRET;
+const REDIRECT_URI          = 'https://turn2026.com/prereg/callback';
 
 // ── Firestore 로직 ──────────────────────────────────────
 async function nextCode() {
@@ -44,13 +49,13 @@ async function getTotal() {
   return snap.exists ? (snap.data().seq || 0) : 0;
 }
 
-async function doRegister(discordId, discordTag, charName) {
+async function doRegister(discordId, discordTag) {
   const ref = db.collection(COL_REG).doc(String(discordId));
   const snap = await ref.get();
   if (snap.exists) return { created: false, ...snap.data() };
   const { code, number } = await nextCode();
   const data = {
-    discordId: String(discordId), discordTag: discordTag || '', charName: charName || '',
+    discordId: String(discordId), discordTag: discordTag || '', charName: '',
     code, number, source: 'bot', claimed: false, claimedBy: null, claimedAt: null,
     createdAt: Date.now(),
   };
@@ -95,6 +100,85 @@ async function assignRole(interaction) {
   } catch (_) {}
 }
 
+// ── Express 서버 ────────────────────────────────────────
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// OAuth 로그인 시작 → 디스코드로 리다이렉트
+app.get('/prereg/login', (req, res) => {
+  const params = new URLSearchParams({
+    client_id: DISCORD_CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    response_type: 'code',
+    scope: 'identify',
+  });
+  res.redirect(`https://discord.com/oauth2/authorize?${params}`);
+});
+
+// OAuth 콜백
+app.get('/prereg/callback', async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.redirect('/prereg.html?error=no_code');
+
+  try {
+    // 토큰 교환
+    const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: DISCORD_CLIENT_ID,
+        client_secret: DISCORD_CLIENT_SECRET,
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: REDIRECT_URI,
+      }),
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenData.access_token) return res.redirect('/prereg.html?error=token_fail');
+
+    // 유저 정보 가져오기
+    const userRes = await fetch('https://discord.com/api/users/@me', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+    const user = await userRes.json();
+    if (!user.id) return res.redirect('/prereg.html?error=user_fail');
+
+    // Firestore에서 사전예약 조회
+    const reg = await lookup(user.id);
+
+    if (!reg) {
+      // 미신청 → prereg.html로 유저 정보 넘기기
+      const params = new URLSearchParams({
+        status: 'none',
+        username: user.username,
+        avatar: user.avatar || '',
+        id: user.id,
+      });
+      return res.redirect(`/prereg.html?${params}`);
+    }
+
+    // 신청 완료
+    const params = new URLSearchParams({
+      status: 'registered',
+      username: user.username,
+      avatar: user.avatar || '',
+      code: reg.code,
+      number: reg.number,
+      claimed: reg.claimed ? '1' : '0',
+    });
+    return res.redirect(`/prereg.html?${params}`);
+
+  } catch (e) {
+    console.error('OAuth 오류:', e);
+    return res.redirect('/prereg.html?error=server_error');
+  }
+});
+
+// 헬스체크
+app.get('/health', (req, res) => res.json({ ok: true }));
+
+app.listen(PORT, () => console.log(`✅ Express 서버 시작 (포트 ${PORT})`));
+
 // ── 슬래시 명령어 ────────────────────────────────────────
 const commands = [
   new SlashCommandBuilder()
@@ -106,7 +190,7 @@ const commands = [
     .setDescription('내 사전예약 번호와 상태를 확인합니다.'),
 ];
 
-// ── 클라이언트 ──────────────────────────────────────────
+// ── 디스코드 봇 ──────────────────────────────────────────
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once('ready', async () => {
@@ -125,14 +209,13 @@ client.once('ready', async () => {
 });
 
 client.on('interactionCreate', async (interaction) => {
-  // 버튼 = 사전예약 신청
   if (interaction.isButton() && interaction.customId === BTN_ID) {
     await interaction.deferReply({ ephemeral: true });
     try {
-      const r = await doRegister(interaction.user.id, userTag(interaction.user), '');
+      const r = await doRegister(interaction.user.id, userTag(interaction.user));
       await assignRole(interaction);
       if (r.created) {
-        await interaction.editReply(`✅ **사전예약이 완료되었습니다!** 좋은 하루 보내세요 🎉\n예약번호: \`${r.code}\` (오픈일 접속 시 자동 지급)`);
+        await interaction.editReply(`✅ **사전예약이 완료되었습니다!** 🎉\n예약번호: \`${r.code}\` (오픈일 접속 시 자동 지급)`);
         try { await interaction.message.edit(buildPanel(await getTotal())); } catch (_) {}
       } else {
         await interaction.editReply(`ℹ️ 이미 사전예약하셨어요.\n예약번호: \`${r.code}\``);
