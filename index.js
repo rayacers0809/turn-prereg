@@ -30,7 +30,7 @@ const BTN_ID  = 'prereg_register';
 const DISCORD_CLIENT_ID     = process.env.CLIENT_ID;
 const API_SECRET            = process.env.API_SECRET || 'turn2026secret';
 const DISCORD_CLIENT_SECRET = process.env.CLIENT_SECRET;
-const REDIRECT_URI          = 'https://turn2026.com/prereg/callback';
+const REDIRECT_URI          = 'https://turn-prereg-production.up.railway.app/prereg/callback';
 
 // ── Firestore 로직 ──────────────────────────────────────
 async function nextCode() {
