@@ -1,7 +1,7 @@
 {
   "name": "turn-prereg-bot",
-  "version": "1.0.0",
-  "description": "Turn City 사전예약 디스코드 봇",
+  "version": "2.0.0",
+  "description": "Turn City 사전예약 봇 + OAuth 서버",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -9,6 +9,8 @@
   "dependencies": {
     "discord.js": "^14.16.3",
     "firebase-admin": "^12.7.0",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2"
   }
 }
