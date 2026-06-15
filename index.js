@@ -28,8 +28,9 @@ const META    = 'prereg_meta';
 const BTN_ID  = 'prereg_register';
 
 const DISCORD_CLIENT_ID     = process.env.CLIENT_ID;
+const API_SECRET            = process.env.API_SECRET || 'turn2026secret';
 const DISCORD_CLIENT_SECRET = process.env.CLIENT_SECRET;
-const REDIRECT_URI          = 'https://turn-prereg-production.up.railway.app/prereg/callback';
+const REDIRECT_URI          = 'https://turn2026.com/prereg/callback';
 
 // ── Firestore 로직 ──────────────────────────────────────
 async function nextCode() {
@@ -172,6 +173,52 @@ app.get('/prereg/callback', async (req, res) => {
   } catch (e) {
     console.error('OAuth 오류:', e);
     return res.redirect('https://turn-prereg-site.pages.dev/prereg.html?error=server_error');
+  }
+});
+
+// ── FiveM 사전예약 검증 API ──────────────────────────────
+app.get('/api/prereg/check', async (req, res) => {
+  // API 키 검증
+  if (req.headers['x-api-key'] !== API_SECRET) {
+    return res.status(401).json({ ok: false, error: 'unauthorized' });
+  }
+
+  const { code, discordId } = req.query;
+  if (!code || !discordId) {
+    return res.status(400).json({ ok: false, error: 'missing params' });
+  }
+
+  try {
+    // 번호로 사전예약자 찾기
+    const snap = await db.collection('prereg').where('code', '==', code.toUpperCase()).limit(1).get();
+
+    if (snap.empty) {
+      return res.json({ ok: false, error: 'not_found', message: '존재하지 않는 예약번호입니다.' });
+    }
+
+    const data = snap.docs[0].data();
+
+    // 이미 수령한 경우
+    if (data.claimed) {
+      return res.json({ ok: false, error: 'already_claimed', message: '이미 보상을 수령한 예약번호입니다.' });
+    }
+
+    // Discord ID 일치 확인
+    if (data.discordId !== String(discordId)) {
+      return res.json({ ok: false, error: 'id_mismatch', message: '예약번호와 디스코드 계정이 일치하지 않습니다.' });
+    }
+
+    // 보상 지급 처리 (claimed: true)
+    await db.collection('prereg').doc(data.discordId).update({
+      claimed: true,
+      claimedAt: Date.now(),
+      claimedBy: String(discordId),
+    });
+
+    return res.json({ ok: true, code: data.code, number: data.number, discordTag: data.discordTag });
+  } catch (e) {
+    console.error('API 오류:', e);
+    return res.status(500).json({ ok: false, error: 'server_error' });
   }
 });
 
