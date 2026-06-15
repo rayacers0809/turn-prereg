@@ -29,7 +29,7 @@ const BTN_ID  = 'prereg_register';
 
 const DISCORD_CLIENT_ID     = process.env.CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.CLIENT_SECRET;
-const REDIRECT_URI          = 'https://turn-prereg-production.up.railway.app/prereg/callback';
+const REDIRECT_URI          = 'https://turn2026.com/prereg/callback';
 
 // ── Firestore 로직 ──────────────────────────────────────
 async function nextCode() {
@@ -189,6 +189,16 @@ const commands = [
   new SlashCommandBuilder()
     .setName('사전예약조회')
     .setDescription('내 사전예약 번호와 상태를 확인합니다.'),
+
+  new SlashCommandBuilder()
+    .setName('사전예약마감')
+    .setDescription('사전예약을 마감합니다. (관리자)')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
+  new SlashCommandBuilder()
+    .setName('사전예약오픈')
+    .setDescription('사전예약을 다시 오픈합니다. (관리자)')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 ];
 
 // ── 디스코드 봇 ──────────────────────────────────────────
@@ -213,6 +223,13 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton() && interaction.customId === BTN_ID) {
     await interaction.deferReply({ ephemeral: true });
     try {
+      // 마감 체크
+      const settingsSnap = await db.collection('prereg_meta').doc('settings').get();
+      const closed = settingsSnap.exists ? (settingsSnap.data().closed || false) : false;
+      if (closed) {
+        await interaction.editReply('🔴 사전예약이 마감되었습니다. 다음 기회를 이용해주세요!');
+        return;
+      }
       const r = await doRegister(interaction.user.id, userTag(interaction.user));
       await assignRole(interaction);
       if (r.created) {
@@ -233,6 +250,32 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.commandName === '사전예약패널') {
     await interaction.reply({ content: '패널을 게시했어요.', ephemeral: true });
     await interaction.channel.send(buildPanel(await getTotal()));
+    return;
+  }
+
+  if (interaction.commandName === '사전예약마감') {
+    try {
+      await db.collection('prereg_meta').doc('settings').set({ closed: true }, { merge: true });
+      await interaction.reply({
+        embeds: [new EmbedBuilder().setColor(0xef4444).setTitle('🔴 사전예약 마감').setDescription('사전예약이 마감되었습니다.').setTimestamp()],
+        ephemeral: true,
+      });
+    } catch (e) {
+      await interaction.reply({ content: '❌ 오류: ' + e.message, ephemeral: true });
+    }
+    return;
+  }
+
+  if (interaction.commandName === '사전예약오픈') {
+    try {
+      await db.collection('prereg_meta').doc('settings').set({ closed: false }, { merge: true });
+      await interaction.reply({
+        embeds: [new EmbedBuilder().setColor(0x22c55e).setTitle('🟢 사전예약 오픈').setDescription('사전예약이 다시 오픈되었습니다.').setTimestamp()],
+        ephemeral: true,
+      });
+    } catch (e) {
+      await interaction.reply({ content: '❌ 오류: ' + e.message, ephemeral: true });
+    }
     return;
   }
 
